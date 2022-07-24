@@ -15,11 +15,11 @@
 module Data.Singletons.Prelude.List.Props where
 
 import           Data.Singletons
--- import           Data.Singletons.Prelude.Bool
+import           Data.Singletons.Prelude.Bool
 import           Data.Singletons.Prelude.Eq
+import           Data.Singletons.Prelude.Function
 import           Data.Singletons.Prelude.List
-
--- import           Data.Singletons.TH
+import           Data.Singletons.TH
 
 -- import           GHC.TypeLits
 
@@ -69,13 +69,15 @@ subListTransLem :: IsSubList xs ys -> IsSubList ys zs -> IsSubList xs ys
 subListTransLem Empty _        = Empty
 subListTransLem (Insert _ _) _ = undefined
 
--- $(singletons [d|
---                removeOne :: Eq a => a -> [a] -> [a]
---                removeOne y = filter (\x -> not ((==) y x))
---                remove :: Eq a => [a] -> [a] -> [a]
---                remove xs []       = xs
---                remove xs (y : ys) = removeOne y (remove xs ys)
---                |])
+-- It seems we can't actually practically use these to get our desired
+-- sublist reduction with proof.
+$(singletons [d|
+               removeOne :: Eq a => a -> [a] -> [a]
+               removeOne y = filter (\x -> not ((==) y x))
+               remove :: Eq a => [a] -> [a] -> [a]
+               remove xs []       = xs
+               remove xs (y : ys) = removeOne y (remove xs ys)
+               |])
 
 -- foo :: SEq a => Sing (x :: a) -> Sing (y :: a) -> Sing (If (x == y) "hello" "there")
 -- foo x y = sIf (x %== y) (sing @"hello") (sing @"there")
@@ -101,12 +103,42 @@ isSubListElim :: (forall (x :: a) (xs' :: [a]). IsElem x ys -> b xs' -> b (x ': 
 isSubListElim _ b Empty        = b
 isSubListElim f b (Insert e s) = f e $ isSubListElim f b s
 
-type F x xs = Sing x
-getElem :: IsElem x xs -> F x xs
-getElem = isElemElim _ _
+-- Use this if we need to track the type of the superlist also
+isSubListElim' :: (forall (x :: a) (xs' :: [a]). IsElem x ys -> b xs' ys -> b (x ': xs') ys)
+               -- ^ TODO The first parameter of the output needs to be a function of x and xs
+            -> b '[] ys
+            -> IsSubList xs ys
+            -> b xs ys
+isSubListElim' _ b Empty        = b
+isSubListElim' f b (Insert e s) = f e $ isSubListElim' f b s
 
+-- TODO figure out how to write this in terms of the eliminator (which
+-- may be badly typed)
+-- getElem :: _
+-- getElem = isElemElim _ _
+
+-- This is maybe a bit of a crutch until we figure out the 'correct'
+-- eliminator for IsElem
+getElem' :: IsElem x ys -> Sing x
+getElem' (First x) = x
+getElem' (Any e) = getElem' e
+
+-- | This is a useful example for how to use the eliminator of
+-- 'IsSubList'
 getSubList :: IsSubList xs ys -> SList xs
-getSubList = isSubListElim _ SNil
+getSubList = isSubListElim f SNil
+  where
+    f :: IsElem x ys -> SList xs' -> SList (x ': xs')
+    f x = SCons $ getElem' x
+
+-- Now, let's see if we can write generalized sublist reduction using
+-- the eliminator
+
+-- | A list with an element removed anywhere is contained in a larger
+-- list, if the original one was
+subListRedGenLem :: SEq a => Sing (x :: a) -> xs `IsSubList` ys -> (RemoveOne x xs) `IsSubList` ys
+subListRedGenLem x xs = isSubListElim' _f Empty xs
+
 
 -- -- | A list with an element removed anywhere is contained in a larger
 -- -- list, if the original one was
